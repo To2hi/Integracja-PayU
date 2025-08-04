@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/**/*",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/payu/create-order",
+      "dest": "api/payu/create-order.js"
+    },
+    {
+      "src": "/api/payu/notify",
+      "dest": "api/payu/notify.js"
+    }
+  ]
+}
