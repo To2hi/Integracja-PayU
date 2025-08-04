@@ -12,13 +12,13 @@ module.exports = async (req, res) => {
     
     console.log(`Tworzenie zamówienia PayU dla zamówienia Ecwid: ${orderId}`);
     
-    // 2. Uzyskaj token dostępowy
+    // 2. Uzyskaj token dostępowy (używając danych testowych dla Sandbox)
     const tokenResponse = await axios.post(
-      'https://secure.payu.com/pl/standard/user/oauth/authorize',
+      'https://secure.snd.payu.com/pl/standard/user/oauth/authorize',
       new URLSearchParams({
         grant_type: 'client_credentials',
-        client_id: process.env.PAYU_OAUTH_CLIENT_ID,
-        client_secret: process.env.PAYU_CLIENT_SECRET
+        client_id: '373966',  // Dane testowe Sandbox
+        client_secret: 'c789a1234567890abcdef1234567890'  // Dane testowe Sandbox
       }),
       {
         headers: {
@@ -33,7 +33,7 @@ module.exports = async (req, res) => {
     const orderData = {
       notifyUrl: `https://${req.headers.host}/api/payu/notify`,
       customerIp: req.headers['x-forwarded-for'] || '127.0.0.1',
-      merchantPosId: process.env.PAYU_POS_ID,
+      merchantPosId: '492453',
       description: `Zamówienie Ecwid #${orderId}`,
       currencyCode: currency || "PLN",
       totalAmount: Math.round(amount * 100), // Kwota w groszach
@@ -54,7 +54,7 @@ module.exports = async (req, res) => {
     
     // 4. Utwórz zamówienie w PayU
     const payuResponse = await axios.post(
-      'https://secure.payu.com/api/v2_1/orders',
+      'https://secure.snd.payu.com/api/v2_1/orders',
       orderData,
       {
         headers: {
