@@ -1,64 +1,89 @@
+const fetch = require('node-fetch');
+const { v4: uuidv4 } = require('uuid');
+
+// 🔐 Dane konfiguracyjne
+const POS_ID = '492453'; // Id punktu płatności (pos_id)
+const CLIENT_ID = '492453'; // OAuth client_id
+const CLIENT_SECRET = 'aedb543dda4489471a8a2ec1fcb71117'; // OAuth client_secret
+const PAYU_OAUTH_URL = 'https://secure.snd.payu.com/pl/standard/user/oauth/authorize';
+const PAYU_ORDER_URL = 'https://secure.snd.payu.com/api/v2_1/orders';
+const NOTIFY_URL = 'https://TWOJA-DOMENA/api/payu/notify'; // <-- Podmień na faktyczny adres notify.js
+const CONTINUE_URL = 'https://TWOJA-DOMENA/dziekujemy'; // <-- Po udanej płatności
+
 module.exports = async (req, res) => {
   try {
-    console.log('Otrzymano powiadomienie od PayU');
-    
-    // FLAGA DLA ŚRODOWISKA TESTOWEGO
-    const isSandbox = true; // Ustaw na false w produkcji
-    
-    // 1. Weryfikacja podpisu (tylko w produkcji)
-    const signatureHeader = req.headers['openpayu-signature'];
-    
-    if (!isSandbox && !signatureHeader) {
-      console.error('Brak nagłówka OpenPayu-Signature');
-      return res.status(400).send('Brak nagłówka OpenPayu-Signature');
+    const { amount, currency, customerEmail, orderId } = req.body;
+
+    if (!amount || !currency || !customerEmail || !orderId) {
+      return res.status(400).json({ error: 'Brakuje wymaganych danych zamówienia' });
     }
-    
-    // 2. Oblicz oczekiwany podpis (tylko w produkcji)
-    let isSignatureValid = true;
-    if (!isSandbox && signatureHeader) {
-      const expectedSignature = crypto.createHash('md5')
-        .update(req.body + '618b313785d080ceea568dc2eab2ab7f')
-        .digest('hex');
-      
-      isSignatureValid = signatureHeader === `sender=payu;signature=${expectedSignature}`;
-      
-      if (!isSignatureValid) {
-        console.error('Nieprawidłowy podpis:', {
-          received: signatureHeader,
-          expected: `sender=payu;signature=${expectedSignature}`
-        });
-        return res.status(400).send('Nieprawidłowy podpis');
-      }
+
+    // 1. 🔐 Uzyskaj token dostępu OAuth
+    const tokenResponse = await fetch(PAYU_OAUTH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `grant_type=client_credentials&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}`
+    });
+
+    const tokenData = await tokenResponse.json();
+
+    if (!tokenData.access_token) {
+      console.error('❌ Błąd autoryzacji PayU:', tokenData);
+      return res.status(500).json({ error: 'Błąd autoryzacji PayU' });
     }
-    
-    // 3. Przetwarzanie powiadomienia
-    const notification = JSON.parse(req.body);
-    const orderId = notification.order.extOrderId;
-    const status = notification.order.status;
-    
-    console.log(`Powiadomienie dla zamówienia ${orderId}: status ${status}`);
-    
-    // 4. Aktualizacja statusu zamówienia w Ecwid
-    if (status === 'COMPLETED' || status === 'WAITING_FOR_CONFIRMATION') {
-      try {
-        await updateEcwidOrderStatus(orderId, 'processing');
-        console.log(`Status zamówienia ${orderId} zaktualizowany na processing`);
-      } catch (err) {
-        console.error(`Błąd aktualizacji statusu zamówienia ${orderId}:`, err);
-      }
-    } else if (status === 'CANCELED') {
-      try {
-        await updateEcwidOrderStatus(orderId, 'canceled');
-        console.log(`Status zamówienia ${orderId} zaktualizowany na canceled`);
-      } catch (err) {
-        console.error(`Błąd aktualizacji statusu zamówienia ${orderId}:`, err);
-      }
+
+    const accessToken = tokenData.access_token;
+
+    // 2. 🧾 Przygotuj dane zamówienia
+    const extOrderId = orderId || uuidv4();
+    const orderPayload = {
+      notifyUrl: NOTIFY_URL,
+      continueUrl: CONTINUE_URL,
+      customerIp: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+      merchantPosId: POS_ID,
+      description: 'Zamówienie Ecwid',
+      currencyCode: currency || 'PLN',
+      totalAmount: Math.round(parseFloat(amount) * 100).toString(), // 10.00 zł => 1000 groszy
+      extOrderId: extOrderId,
+      buyer: {
+        email: customerEmail
+      },
+      products: [
+        {
+          name: 'Produkt Ecwid',
+          unitPrice: Math.round(parseFloat(amount) * 100).toString(),
+          quantity: 1
+        }
+      ]
+    };
+
+    // 3. 📦 Wyślij zamówienie do PayU
+    const orderResponse = await fetch(PAYU_ORDER_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+      },
+      body: JSON.stringify(orderPayload)
+    });
+
+    const orderData = await orderResponse.json();
+
+    if (orderData.status?.statusCode !== 'SUCCESS') {
+      console.error('❌ Błąd tworzenia zamówienia:', orderData);
+      return res.status(500).json({ error: 'Błąd tworzenia zamówienia w PayU' });
     }
-    
-    // 5. Potwierdzenie odbioru
-    res.status(200).send('OK');
+
+    // 4. ✅ Zwrot linku do płatności
+    const redirectUri = orderData.redirectUri;
+    res.status(200).json({
+      message: 'Zamówienie utworzone',
+      redirectUri,
+      payuOrderId: orderData.orderId
+    });
+
   } catch (error) {
-    console.error('Błąd w notifyUrl:', error.message);
-    res.status(500).send('Internal Server Error');
+    console.error('❌ Błąd create-order.js:', error);
+    res.status(500).json({ error: 'Wewnętrzny błąd serwera' });
   }
 };
