@@ -1,93 +1,101 @@
-import crypto from 'crypto';
-import fetch from 'node-fetch'; // jeśli potrzebujesz, w nowszych node wersjach globalny fetch jest dostępny
+const crypto = require('crypto');
 
-const MD5_KEY = '618b313785d080ceea568dc2eab2ab7f';  // Twój MD5 klucz PayU
-const ECWID_STORE_ID = '42380002';                     // Twój Ecwid Store ID
-const ECWID_TOKEN = 'public_JzusuYGtep43TAjXNkguMATTdduPBzH8'; // Ecwid API token
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).send('Method Not Allowed');
-  }
+// 🔐 Dane konfiguracyjne
+const MD5_SECOND_KEY = '618b313785d080ceea568dc2eab2ab7f'; // Drugi klucz z panelu PayU
+const ECWID_STORE_ID = '42380002';
+const ECWID_API_TOKEN = 'public_JzusuYGtep43TAjXNkguMATTdduPBzH8';
 
+
+module.exports = async (req, res) => {
   try {
-    // 1. Wczytaj body (może być string lub już JSON)
-    const bodyRaw = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    console.log('✅ Odebrano powiadomienie od PayU');
 
-    // 2. Odczytaj podpis z nagłówka (lub z body, zależnie od PayU)
-    // Załóżmy, że PayU wysyła podpis w nagłówku 'OpenPayu-Signature' lub w body JSON pod 'signature'
-    // Dostosuj do swojego przypadku
-    const receivedSignature = req.headers['openpayu-signature'] || (req.body && req.body.signature);
-    if (!receivedSignature) {
-      console.error('Brak podpisu w żądaniu');
-      return res.status(400).send('Brak podpisu');
+    // Pobierz nagłówek podpisu (tylko w produkcji)
+    const signatureHeader = req.headers['openpayu-signature'];
+
+    // Walidacja nagłówka (jeśli produkcja)
+    if (!IS_SANDBOX && !signatureHeader) {
+      console.error('❌ Brak nagłówka OpenPayu-Signature');
+      return res.status(400).send('Brak nagłówka OpenPayu-Signature');
     }
 
-    // 3. Oblicz lokalny podpis (MD5 na body + MD5_KEY)
-    const localSignature = crypto
-      .createHash('md5')
-      .update(bodyRaw + MD5_KEY)
-      .digest('hex');
-
-    if (localSignature !== receivedSignature) {
-      console.error(`Nieprawidłowy podpis. Otrzymano: ${receivedSignature}, oczekiwano: ${localSignature}`);
-      return res.status(400).send('Nieprawidłowy podpis');
-    }
-
-    // 4. Parsuj powiadomienie
+    // Parsowanie ciała
+    const bodyString = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
     const notification = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
 
-    const orderId = notification.order?.extOrderId;
-    const status = notification.order?.status;
+    // Sprawdzenie podpisu (jeśli produkcja)
+    if (!IS_SANDBOX && signatureHeader) {
+      const expectedHash = crypto
+        .createHash('md5')
+        .update(bodyString + MD5_SECOND_KEY)
+        .digest('hex');
 
-    if (!orderId || !status) {
-      console.error('Brak orderId lub statusu w powiadomieniu');
-      return res.status(400).send('Brak orderId lub statusu');
+      const expectedSignature = `sender=payu;signature=${expectedHash}`;
+
+      if (signatureHeader !== expectedSignature) {
+        console.error('❌ Nieprawidłowy podpis:', {
+          odebrany: signatureHeader,
+          oczekiwany: expectedSignature,
+        });
+        return res.status(400).send('Nieprawidłowy podpis');
+      }
     }
 
-    console.log(`Powiadomienie dla zamówienia ${orderId}: status ${status}`);
+    // 🧾 Pobierz dane z powiadomienia
+    const orderId = notification?.order?.extOrderId;
+    const status = notification?.order?.status;
 
-    // 5. Mapowanie statusów PayU na statusy Ecwid
-    let ecwidStatus = null;
-    if (status === 'COMPLETED' || status === 'WAITING_FOR_CONFIRMATION') {
-      ecwidStatus = 'PROCESSING';  // status Ecwid dla płatności zaakceptowanych
+    if (!orderId || !status) {
+      console.error('❌ Brakuje orderId lub statusu w powiadomieniu');
+      return res.status(400).send('Nieprawidłowe dane');
+    }
+
+    console.log(`🔔 Zamówienie ${orderId} - status: ${status}`);
+
+    // 🛠️ Mapowanie statusów PayU -> Ecwid
+    let ecwidOrderStatus = null;
+
+    if (['COMPLETED', 'WAITING_FOR_CONFIRMATION'].includes(status)) {
+      ecwidOrderStatus = 'PROCESSING';
     } else if (status === 'CANCELED') {
-      ecwidStatus = 'CANCELED';    // status Ecwid dla anulowanych zamówień
+      ecwidOrderStatus = 'CANCELED';
     } else {
-      // inne statusy ignorujemy lub logujemy
-      console.log(`Status ${status} nie wymaga aktualizacji w Ecwid`);
+      console.log(`ℹ️ Status ${status} nie wymaga aktualizacji w Ecwid`);
       return res.status(200).send('OK');
     }
 
-    // 6. Aktualizuj status zamówienia w Ecwid
-    await updateEcwidOrderStatus(orderId, ecwidStatus);
-    console.log(`Status zamówienia ${orderId} zaktualizowany na ${ecwidStatus}`);
+    // 🔄 Aktualizacja statusu zamówienia w Ecwid
+    await updateEcwidOrderStatus(orderId, ecwidOrderStatus);
+    console.log(`✅ Status zamówienia ${orderId} zaktualizowany na ${ecwidOrderStatus}`);
 
-    // 7. Zwróć potwierdzenie odbioru webhooka
-    res.status(200).send('OK');
-  } catch (error) {
-    console.error('Błąd w handlerze webhooka:', error);
-    res.status(500).send('Internal Server Error');
+    return res.status(200).send('OK');
+
+  } catch (err) {
+    console.error('❌ Błąd przetwarzania powiadomienia:', err);
+    return res.status(500).send('Internal Server Error');
   }
-}
+};
 
+// 🔧 Funkcja aktualizująca status w Ecwid
 async function updateEcwidOrderStatus(orderId, status) {
-  const response = await fetch(`https://app.ecwid.com/api/v3/${ECWID_STORE_ID}/orders/${orderId}`, {
+  const url = `https://app.ecwid.com/api/v3/${ECWID_STORE_ID}/orders/${orderId}`;
+
+  const response = await fetch(url, {
     method: 'PUT',
     headers: {
-      'Authorization': `Bearer ${ECWID_TOKEN}`,
-      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${ECWID_API_TOKEN}`,
+      'Content-Type': 'application/json'
     },
     body: JSON.stringify({
       orderStatus: status
-    }),
+    })
   });
 
   if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`Błąd HTTP: ${response.status}, odpowiedź: ${errorBody}`);
+    const errorText = await response.text();
+    throw new Error(`HTTP ${response.status}: ${errorText}`);
   }
 
   return response.json();
 }
-
