@@ -1,101 +1,77 @@
-const crypto = require('crypto');
-
-
-// 🔐 Dane konfiguracyjne
-const MD5_SECOND_KEY = '618b313785d080ceea568dc2eab2ab7f'; // Drugi klucz z panelu PayU
-const ECWID_STORE_ID = '42380002';
-const ECWID_API_TOKEN = 'public_JzusuYGtep43TAjXNkguMATTdduPBzH8';
-
+const fetch = require('node-fetch');
+const IS_SANDBOX = true; // Ustaw na false w produkcji
 
 module.exports = async (req, res) => {
   try {
-    console.log('✅ Odebrano powiadomienie od PayU');
+    const { orderId, amount, currency, customerEmail } = req.body;
 
-    // Pobierz nagłówek podpisu (tylko w produkcji)
-    const signatureHeader = req.headers['openpayu-signature'];
-
-    // Walidacja nagłówka (jeśli produkcja)
-    if (!IS_SANDBOX && !signatureHeader) {
-      console.error('❌ Brak nagłówka OpenPayu-Signature');
-      return res.status(400).send('Brak nagłówka OpenPayu-Signature');
+    if (!orderId || !amount || !currency || !customerEmail) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Parsowanie ciała
-    const bodyString = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-    const notification = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const PAYU_URL = IS_SANDBOX
+      ? 'https://secure.snd.payu.com'
+      : 'https://secure.payu.com';
 
-    // Sprawdzenie podpisu (jeśli produkcja)
-    if (!IS_SANDBOX && signatureHeader) {
-      const expectedHash = crypto
-        .createHash('md5')
-        .update(bodyString + MD5_SECOND_KEY)
-        .digest('hex');
+    const CLIENT_ID = '492453';
+    const CLIENT_SECRET = 'aedb543dda4489471a8a2ec1fcb71117';
+    const POS_ID = '492453';
 
-      const expectedSignature = `sender=payu;signature=${expectedHash}`;
+    const tokenResponse = await fetch(`${PAYU_URL}/pl/standard/user/oauth/authorize`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: 'Basic ' + Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64'),
+      },
+      body: 'grant_type=client_credentials'
+    });
 
-      if (signatureHeader !== expectedSignature) {
-        console.error('❌ Nieprawidłowy podpis:', {
-          odebrany: signatureHeader,
-          oczekiwany: expectedSignature,
-        });
-        return res.status(400).send('Nieprawidłowy podpis');
-      }
+    const tokenData = await tokenResponse.json();
+
+    if (!tokenData.access_token) {
+      throw new Error('Nie udało się pobrać tokenu dostępu');
     }
 
-    // 🧾 Pobierz dane z powiadomienia
-    const orderId = notification?.order?.extOrderId;
-    const status = notification?.order?.status;
+    const accessToken = tokenData.access_token;
 
-    if (!orderId || !status) {
-      console.error('❌ Brakuje orderId lub statusu w powiadomieniu');
-      return res.status(400).send('Nieprawidłowe dane');
+    const orderResponse = await fetch(`${PAYU_URL}/api/v2_1/orders`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        notifyUrl: 'https://integracja-pay-u-git-main-meat4dogs-projects.vercel.app/api/payu/notify',
+        customerIp: '127.0.0.1',
+        merchantPosId: POS_ID,
+        description: 'Zamówienie Ecwid',
+        currencyCode: currency,
+        totalAmount: Math.round(parseFloat(amount) * 100).toString(),
+        extOrderId: orderId,
+        buyer: {
+          email: customerEmail,
+          language: 'pl'
+        },
+        products: [{
+          name: 'Zamówienie',
+          unitPrice: Math.round(parseFloat(amount) * 100).toString(),
+          quantity: '1'
+        }]
+      })
+    });
+
+    const orderData = await orderResponse.json();
+
+    if (orderData.status.statusCode !== 'SUCCESS') {
+      throw new Error(`Błąd PayU: ${orderData.status.statusCode}`);
     }
 
-    console.log(`🔔 Zamówienie ${orderId} - status: ${status}`);
-
-    // 🛠️ Mapowanie statusów PayU -> Ecwid
-    let ecwidOrderStatus = null;
-
-    if (['COMPLETED', 'WAITING_FOR_CONFIRMATION'].includes(status)) {
-      ecwidOrderStatus = 'PROCESSING';
-    } else if (status === 'CANCELED') {
-      ecwidOrderStatus = 'CANCELED';
-    } else {
-      console.log(`ℹ️ Status ${status} nie wymaga aktualizacji w Ecwid`);
-      return res.status(200).send('OK');
-    }
-
-    // 🔄 Aktualizacja statusu zamówienia w Ecwid
-    await updateEcwidOrderStatus(orderId, ecwidOrderStatus);
-    console.log(`✅ Status zamówienia ${orderId} zaktualizowany na ${ecwidOrderStatus}`);
-
-    return res.status(200).send('OK');
-
-  } catch (err) {
-    console.error('❌ Błąd przetwarzania powiadomienia:', err);
-    return res.status(500).send('Internal Server Error');
+    res.redirect(orderData.redirectUri);
+  } catch (error) {
+    console.error('❌ Błąd przetwarzania powiadomienia:', error);
+    res.status(500).send('Internal Server Error');
   }
 };
-
-// 🔧 Funkcja aktualizująca status w Ecwid
-async function updateEcwidOrderStatus(orderId, status) {
-  const url = `https://app.ecwid.com/api/v3/${ECWID_STORE_ID}/orders/${orderId}`;
-
-  const response = await fetch(url, {
-    method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${ECWID_API_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      orderStatus: status
-    })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`HTTP ${response.status}: ${errorText}`);
-  }
 
   return response.json();
 }
