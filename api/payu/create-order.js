@@ -1,19 +1,38 @@
-const crypto = require('crypto');
+const querystring = require('querystring');
 
-// Flaga środowiska testowego
 const IS_SANDBOX = true;
-
-// Klucze PayU
 const POS_ID = '492453';
 const CLIENT_ID = '492453';
 const CLIENT_SECRET = 'aedb543dda4489471a8a2ec1fcb71117';
-const SECOND_KEY_MD5 = '618b313785d080ceea568dc2eab2ab7f';
 
 module.exports = async (req, res) => {
   try {
+    // Obsługa application/x-www-form-urlencoded
+    if (!req.body) {
+      const buffers = [];
+
+      for await (const chunk of req) {
+        buffers.push(chunk);
+      }
+
+      const bodyData = Buffer.concat(buffers).toString();
+
+      if (req.headers['content-type'] === 'application/x-www-form-urlencoded') {
+        req.body = querystring.parse(bodyData);
+      } else if (req.headers['content-type']?.includes('application/json')) {
+        req.body = JSON.parse(bodyData);
+      } else {
+        throw new Error('Unsupported content type');
+      }
+    }
+
     const { orderId, amount, currency, customerEmail } = req.body;
 
-    // 1. Pobierz token dostępu od PayU
+    if (!orderId || !amount || !currency || !customerEmail) {
+      return res.status(400).json({ error: 'Brak wymaganych danych w body' });
+    }
+
+    // 1. Uzyskaj token
     const tokenResponse = await fetch('https://secure.snd.payu.com/pl/standard/user/oauth/authorize', {
       method: 'POST',
       headers: {
@@ -26,14 +45,14 @@ module.exports = async (req, res) => {
     const tokenData = await tokenResponse.json();
     const accessToken = tokenData.access_token;
 
-    // 2. Przygotuj dane zamówienia
+    // 2. Tworzenie zamówienia
     const orderData = {
       notifyUrl: 'https://integracja-pay-u-git-main-meat4dogs-projects.vercel.app/api/payu/notify',
-      customerIp: req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1',
+      customerIp: req.headers['x-forwarded-for'] || '127.0.0.1',
       merchantPosId: POS_ID,
       description: 'Zamówienie z Ecwid',
       currencyCode: currency,
-      totalAmount: Math.round(parseFloat(amount) * 100).toString(), // w groszach
+      totalAmount: Math.round(parseFloat(amount) * 100).toString(),
       extOrderId: orderId,
       buyer: {
         email: customerEmail,
@@ -47,7 +66,6 @@ module.exports = async (req, res) => {
       ],
     };
 
-    // 3. Wyślij żądanie utworzenia zamówienia
     const payuResponse = await fetch('https://secure.snd.payu.com/api/v2_1/orders', {
       method: 'POST',
       headers: {
@@ -59,20 +77,16 @@ module.exports = async (req, res) => {
 
     const payuData = await payuResponse.json();
 
-    if (payuResponse.status !== 302 && payuResponse.status !== 200) {
-      return res.status(400).json({
-        error: 'Nie udało się utworzyć zamówienia w PayU',
-        details: payuData,
-      });
+    if (!payuResponse.ok) {
+      return res.status(400).json({ error: 'Błąd tworzenia zamówienia', details: payuData });
     }
 
-    // 4. Przekieruj klienta do płatności
     return res.status(200).json({
       redirectUrl: payuData.redirectUri,
       orderId: payuData.orderId,
     });
   } catch (err) {
-    console.error('❌ Błąd przetwarzania powiadomienia:', err);
+    console.error('❌ Błąd:', err);
     return res.status(500).json({ error: 'Internal Server Error', message: err.message });
   }
 };
