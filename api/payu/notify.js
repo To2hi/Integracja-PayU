@@ -7,8 +7,7 @@ const CLIENT_ID = '492453'; // OAuth client_id
 const CLIENT_SECRET = 'aedb543dda4489471a8a2ec1fcb71117'; // OAuth client_secret
 const PAYU_OAUTH_URL = 'https://secure.snd.payu.com/pl/standard/user/oauth/authorize';
 const PAYU_ORDER_URL = 'https://secure.snd.payu.com/api/v2_1/orders';
-const NOTIFY_URL = 'https://TWOJA-DOMENA/api/payu/notify'; // <-- Podmień na faktyczny adres notify.js
-const CONTINUE_URL = 'https://TWOJA-DOMENA/dziekujemy'; // <-- Po udanej płatności
+
 
 module.exports = async (req, res) => {
   try {
@@ -37,8 +36,6 @@ module.exports = async (req, res) => {
     // 2. 🧾 Przygotuj dane zamówienia
     const extOrderId = orderId || uuidv4();
     const orderPayload = {
-      notifyUrl: NOTIFY_URL,
-      continueUrl: CONTINUE_URL,
       customerIp: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
       merchantPosId: POS_ID,
       description: 'Zamówienie Ecwid',
