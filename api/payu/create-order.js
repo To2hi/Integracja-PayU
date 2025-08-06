@@ -14,7 +14,25 @@ module.exports = async (req, res) => {
       for await (const chunk of req) {
         buffers.push(chunk);
       }
+f (!req.body) {
+  const buffers = [];
+  for await (const chunk of req) {
+    buffers.push(chunk);
+  }
 
+  const rawBody = Buffer.concat(buffers).toString();
+  const contentType = req.headers['content-type'] || '';
+
+  console.log('Content-Type:', contentType);
+  console.log('Raw body:', rawBody);
+
+  if (contentType.includes('application/json')) {
+    req.body = JSON.parse(rawBody);
+  } else if (contentType.includes('application/x-www-form-urlencoded')) {
+    req.body = require('querystring').parse(rawBody);
+  } else {
+    throw new Error(`Unsupported content type: ${contentType}`);
+  }
       const bodyData = Buffer.concat(buffers).toString();
 
       if (req.headers['content-type'] === 'application/x-www-form-urlencoded') {
