@@ -13,7 +13,7 @@ module.exports = async (req, res) => {
     
     // 2. Oblicz oczekiwany podpis
     const expectedSignature = crypto.createHash('md5')
-      .update(req.body + process.env.PAYU_MD5_KEY)
+      .update(req.body + '618b313785d080ceea568dc2eab2ab7f')
       .digest('hex');
     
     // 3. Sprawdź poprawność podpisu
@@ -58,10 +58,10 @@ module.exports = async (req, res) => {
 };
 
 async function updateEcwidOrderStatus(orderId, status) {
-  const response = await fetch(`https://app.ecwid.com/api/v3/${process.env.ECWID_STORE_ID}/orders/${orderId}`, {
+  const response = await fetch(`https://app.ecwid.com/api/v3/42380002/orders/${orderId}`, {
     method: 'PUT',
     headers: {
-      'Authorization': `Bearer ${process.env.ECWID_PUBLIC_TOKEN}`,
+      'Authorization': `Bearer public_JzusuYGtep43TAjXNkguMATTdduPBzH8`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
