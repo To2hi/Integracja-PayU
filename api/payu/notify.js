@@ -1,38 +1,44 @@
-const crypto = require('crypto');
-
 module.exports = async (req, res) => {
   try {
     console.log('Otrzymano powiadomienie od PayU');
     
-    // 1. Weryfikacja podpisu
+    // FLAGA DLA ŚRODOWISKA TESTOWEGO
+    const isSandbox = true; // Ustaw na false w produkcji
+    
+    // 1. Weryfikacja podpisu (tylko w produkcji)
     const signatureHeader = req.headers['openpayu-signature'];
-    if (!signatureHeader) {
+    
+    if (!isSandbox && !signatureHeader) {
       console.error('Brak nagłówka OpenPayu-Signature');
       return res.status(400).send('Brak nagłówka OpenPayu-Signature');
     }
     
-    // 2. Oblicz oczekiwany podpis
-    const expectedSignature = crypto.createHash('md5')
-      .update(req.body + '618b313785d080ceea568dc2eab2ab7f')
-      .digest('hex');
-    
-    // 3. Sprawdź poprawność podpisu
-    if (signatureHeader !== `sender=payu;signature=${expectedSignature}`) {
-      console.error('Nieprawidłowy podpis:', {
-        received: signatureHeader,
-        expected: `sender=payu;signature=${expectedSignature}`
-      });
-      return res.status(400).send('Nieprawidłowy podpis');
+    // 2. Oblicz oczekiwany podpis (tylko w produkcji)
+    let isSignatureValid = true;
+    if (!isSandbox && signatureHeader) {
+      const expectedSignature = crypto.createHash('md5')
+        .update(req.body + '618b313785d080ceea568dc2eab2ab7f')
+        .digest('hex');
+      
+      isSignatureValid = signatureHeader === `sender=payu;signature=${expectedSignature}`;
+      
+      if (!isSignatureValid) {
+        console.error('Nieprawidłowy podpis:', {
+          received: signatureHeader,
+          expected: `sender=payu;signature=${expectedSignature}`
+        });
+        return res.status(400).send('Nieprawidłowy podpis');
+      }
     }
     
-    // 4. Przetwarzanie powiadomienia
+    // 3. Przetwarzanie powiadomienia
     const notification = JSON.parse(req.body);
     const orderId = notification.order.extOrderId;
     const status = notification.order.status;
     
     console.log(`Powiadomienie dla zamówienia ${orderId}: status ${status}`);
     
-    // 5. Aktualizacja statusu zamówienia w Ecwid
+    // 4. Aktualizacja statusu zamówienia w Ecwid
     if (status === 'COMPLETED' || status === 'WAITING_FOR_CONFIRMATION') {
       try {
         await updateEcwidOrderStatus(orderId, 'processing');
@@ -49,30 +55,10 @@ module.exports = async (req, res) => {
       }
     }
     
-    // 6. Potwierdzenie odbioru
+    // 5. Potwierdzenie odbioru
     res.status(200).send('OK');
   } catch (error) {
     console.error('Błąd w notifyUrl:', error.message);
     res.status(500).send('Internal Server Error');
   }
 };
-
-async function updateEcwidOrderStatus(orderId, status) {
-  const response = await fetch(`https://app.ecwid.com/api/v3/42380002/orders/${orderId}`, {
-    method: 'PUT',
-    headers: {
-      'Authorization': `Bearer public_JzusuYGtep43TAjXNkguMATTdduPBzH8`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      paymentStatus: status
-    })
-  });
-  
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`HTTP error! status: ${response.status}, body: ${errorBody}`);
-  }
-  
-  return response.json();
-}
