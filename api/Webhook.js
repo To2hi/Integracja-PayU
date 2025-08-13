@@ -1,4 +1,4 @@
-Import crypto from "crypto";
+import crypto from "crypto";
 import getRawBody from "raw-body";
 
 export const config = {
