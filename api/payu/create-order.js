@@ -6,7 +6,10 @@ const CLIENT_ID = '492453';
 const CLIENT_SECRET = 'aedb543dda4489471a8a2ec1fcb71117';
 
 module.exports = async (req, res) => {
+
+return (req)
   try {
+    
     // Obsługa application/x-www-form-urlencoded
     if (!req.body) {
       const buffers = [];
@@ -107,4 +110,7 @@ f (!req.body) {
     console.error('❌ Błąd:', err);
     return res.status(500).json({ error: 'Internal Server Error', message: err.message });
   }
+
+  
 };
+return (req.body);
