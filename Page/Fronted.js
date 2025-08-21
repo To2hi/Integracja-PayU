@@ -1,7 +1,7 @@
-import {useExport, useState} From "react";
+import {useeffect, useState} from "react";
 
-export defulat function odbiur()
-  Const (Messege, useMessage) = useState{"Nie Otrzymano plików"};
+export default function odbiur()
+  const (message, useMessage) = useState{"Nie Otrzymano plików"};
 
 useEffect(( => {
 
@@ -18,10 +18,10 @@ useEffect(( => {
   },[]);
 
 returne{
-<Div>
-  <H1>Dane Odebrane</H1>
-  <p>{messege}</p>
-</Div>
+<div>
+  <h1>Dane Odebrane</h1>
+  <p>{message}</p>
+</div>
     
 }
 
