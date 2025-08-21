@@ -1,11 +1,10 @@
 
-export deflaut asyc funcion hendler(res,req) {
-  if (req.metod == "POST" )
+export default function hendler(res, req) {
+  if (req.method === "POST")
   {
   const body = req.body;
-
-    res.status(200).Json({ string: body.string || null});
-  }  elese
+    res.status(200).json({ string: body.string || null});
+  }else 
   {
     re.status(200).json({ string: null});
     
@@ -13,4 +12,13 @@ export deflaut asyc funcion hendler(res,req) {
 
 
   
+}
+
+export default function handler(req, res) {
+  if (req.method === "POST") {
+    const body = req.body;
+    res.status(200).json({ string: body.string || null });
+  } else {
+    res.status(200).json({ string: null });
+  }
 }
