@@ -23,8 +23,5 @@ returne{
   <p>{message}</p>
 </div>
     
-}
-
-
-  
+};
 )
