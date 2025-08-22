@@ -6,7 +6,7 @@ export default function handler(req, res) {
     res.status(200).json({ string: body.string || null});
   }else 
   {
-    req.status(200).json({ string: null});
+    res.status(200).json({ string: null});
     
   }
   
