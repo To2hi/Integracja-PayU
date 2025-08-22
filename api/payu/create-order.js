@@ -1,6 +1,5 @@
 export default async function handler(req, res) {
   if (req.method === "POST") {
-    // ręczne czytanie body (x-www-form-urlencoded)
     let body = "";
     await new Promise((resolve) => {
       req.on("data", (chunk) => {
@@ -9,7 +8,6 @@ export default async function handler(req, res) {
       req.on("end", resolve);
     });
 
-    // parsowanie danych formularza
     const params = new URLSearchParams(body);
     const stringValue = params.get("string");
 
